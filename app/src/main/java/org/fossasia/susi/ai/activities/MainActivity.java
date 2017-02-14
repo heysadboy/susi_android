@@ -19,9 +19,12 @@ import android.location.Geocoder;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.AlarmClock;
+import android.provider.CalendarContract;
 import android.provider.MediaStore;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
@@ -57,25 +60,35 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import com.bumptech.glide.Glide;
+
 import org.fossasia.susi.ai.R;
 import org.fossasia.susi.ai.adapters.recycleradapters.ChatFeedRecyclerAdapter;
 import org.fossasia.susi.ai.helper.Constant;
 import org.fossasia.susi.ai.helper.DateTimeHelper;
+import org.fossasia.susi.ai.helper.GetVideos;
 import org.fossasia.susi.ai.helper.PrefManager;
 import org.fossasia.susi.ai.model.ChatMessage;
 import org.fossasia.susi.ai.rest.BaseUrl;
 import org.fossasia.susi.ai.rest.ClientBuilder;
 import org.fossasia.susi.ai.rest.LocationClient;
 import org.fossasia.susi.ai.rest.LocationService;
+import org.fossasia.susi.ai.rest.VideoSeachClient;
+import org.fossasia.susi.ai.rest.VideoSearchApi;
 import org.fossasia.susi.ai.rest.model.Datum;
 import org.fossasia.susi.ai.rest.model.LocationHelper;
 import org.fossasia.susi.ai.rest.model.LocationResponse;
 import org.fossasia.susi.ai.rest.model.SusiResponse;
+import org.fossasia.susi.ai.rest.model.VideoSearch;
+
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Deque;
 import java.util.LinkedList;
@@ -83,6 +96,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import io.realm.Case;
@@ -136,7 +151,14 @@ public class MainActivity extends AppCompatActivity {
     private Realm realm;
     public static String webSearch;
     private String googlesearch_query = "";
+    private String video_query = "";
     private TextToSpeech textToSpeech;
+    private String[] array;
+    private String timenow;
+    private int reminderQuery;
+    private String reminder;
+    private int count = 0;
+    private static final String[] id = new String[1];
 
     private AudioManager.OnAudioFocusChangeListener afChangeListener =
             new AudioManager.OnAudioFocusChangeListener() {
@@ -307,16 +329,14 @@ public class MainActivity extends AppCompatActivity {
                             InputStream imageStream;
                             Bitmap selectedImage;
                             try {
-                                cropCapturedImage(selectedImageUri);
+                                cropCapturedImage(getImageUrl(getApplicationContext(), selectedImageUri));
                             } catch (ActivityNotFoundException aNFE) {
                                 //display an error message if user device doesn't support
                                 showToast(getString(R.string.error_crop_not_supported));
                                 try {
                                     String[] filePathColumn = {MediaStore.Images.Media.DATA};
-                                    Cursor cursor = getContentResolver().query(selectedImageUri, filePathColumn, null, null, null);
+                                    Cursor cursor = getContentResolver().query(getImageUrl(getApplicationContext(), selectedImageUri), filePathColumn, null, null, null);
                                     cursor.moveToFirst();
-                                    int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
-                                    String picturePath = cursor.getString(columnIndex);
                                     imageStream = getContentResolver().openInputStream(selectedImageUri);
                                     selectedImage = BitmapFactory.decodeStream(imageStream);
                                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -338,6 +358,31 @@ public class MainActivity extends AppCompatActivity {
                 break;
             }
         }
+    }
+
+    public static Uri writeToTempImage(Context inContext, Bitmap inImage) {
+        String path = MediaStore.Images.Media.insertImage(inContext.getContentResolver(), inImage, "Title", null);
+        return Uri.parse(path);
+    }
+
+    public static Uri getImageUrl(Context context, Uri uri) {
+        InputStream is = null;
+        if (uri.getAuthority() != null) {
+            try {
+                is = context.getContentResolver().openInputStream(uri);
+                Bitmap bmp = BitmapFactory.decodeStream(is);
+                return writeToTempImage(context, bmp);
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }finally {
+                try {
+                    is.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return null;
     }
 
     private void init() {
@@ -434,6 +479,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
         switch (requestCode) {
@@ -454,6 +500,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
 
     private void voiceReply(final String reply, final boolean isMap) {
         if ((checkSpeechOutputPref() && check) || checkSpeechAlwaysPref()) {
@@ -618,16 +665,21 @@ public class MainActivity extends AppCompatActivity {
             id = (long) temp + 1;
         }
         boolean isHavingLink;
-        List<String> urlList = extractUrls(query);
-        Log.d(TAG, urlList.toString());
-        isHavingLink = urlList != null;
-        if (urlList.size() == 0) isHavingLink = false;
-        if(id==0) {
+        if(query.toLowerCase().contains("send mail")||query.toLowerCase().contains("send a mail")||query.toLowerCase().contains("send the mail")){
+            isHavingLink = false ;
+        }
+        else {
+            List<String> urlList = extractUrls(query);
+            Log.d(TAG, urlList.toString());
+            isHavingLink = urlList != null;
+            if (urlList.size() == 0) isHavingLink = false;
+        }
+        if (id == 0) {
             updateDatabase(id, " ", DateTimeHelper.getDate(), true, false, false, false, false, false, false, DateTimeHelper.getCurrentTime(), false, null);
             id++;
         } else {
-            String s = realm.where(ChatMessage.class).equalTo("id",id-1).findFirst().getDate();
-            if(!DateTimeHelper.getDate().equals(s)) {
+            String s = realm.where(ChatMessage.class).equalTo("id", id - 1).findFirst().getDate();
+            if (!DateTimeHelper.getDate().equals(s)) {
                 updateDatabase(id, "", DateTimeHelper.getDate(), true, false, false, false, false, false, false, DateTimeHelper.getCurrentTime(), false, null);
                 id++;
             }
@@ -636,15 +688,20 @@ public class MainActivity extends AppCompatActivity {
         updateDatabase(id, query, DateTimeHelper.getDate(), false, true, false, false, false, false, isHavingLink, DateTimeHelper.getCurrentTime(), false, null);
         nonDeliveredMessages.add(new Pair(query, id));
         getLocationFromLocationService();
-        recyclerAdapter.showDots();
         new computeThread().start();
     }
 
     private synchronized void computeOtherMessage() {
         final String query;
         final long id;
-        String answer_call=null;
-        String google_search = null;
+        String answerCall = null;
+        String googleSearch = null;
+        String playVideo = null;
+        String sendMessage = null;
+        String reminder = null;
+        String sendMail = null;
+        String setAlarm = null;
+        final String[] reminderDate = {null};
         if (null != nonDeliveredMessages && !nonDeliveredMessages.isEmpty()) {
             if (isNetworkConnected()) {
                 TimeZone tz = TimeZone.getDefault();
@@ -653,29 +710,127 @@ public class MainActivity extends AppCompatActivity {
                 query = nonDeliveredMessages.getFirst().first;
                 id = nonDeliveredMessages.getFirst().second;
                 nonDeliveredMessages.pop();
-                String section[]=query.split(" ");
-                if(section.length==2 && section[0].equalsIgnoreCase("call")){
-                    answer_call="Calling "+section[1];
+                String section[] = query.split(" ");
+                if (section.length == 2 && section[0].equalsIgnoreCase("call")) {
+                    answerCall = "Calling " + section[1];
                 }
+                if (query.toLowerCase().contains("set alarm")) {
+
+                    LinkedList<String> list = new LinkedList<>();
+                    Matcher matcher = Pattern.compile("\\d+").matcher(query);
+                    while (matcher.find()) {
+                        list.add(matcher.group());
+                    }
+                    array = list.toArray(new String[list.size()]);
+                    System.out.println(Arrays.toString(array));
+
+                    Log.v(TAG, "computeOtherMessage: " + Arrays.toString(array));
+
+                    setAlarm = getString(R.string.set_alarm);
+
+                    if (query.toLowerCase().contains("am"))
+                        timenow = "AM";
+                    else if (query.toLowerCase().contains("pm"))
+                        timenow = "PM";
+                    else
+                        timenow = null;
+
+
+                }
+                if (query.toLowerCase().contains("set reminder") || query.toLowerCase().contains("set the reminder")) {
+
+                    reminderQuery = 0;
+                    Log.d(TAG , "query  " + reminderQuery);
+                    reminder = getString(R.string.reminder_description);
+                }
+
+                if(section[0].equalsIgnoreCase("play")){
+                    count = 0;
+
+                    playVideo = getString(R.string.play_video);
+                    int size = section.length;
+                    video_query = "";
+
+                    for (int i = 1; i < size; i++) {
+                        video_query = video_query + " " + section[i];
+                    }
+                    video_query = video_query.replace(" ", "+");
+
+                    String vid = getvideos(video_query);
+                    Log.d(TAG, "computeOtherMessage: " + vid);
+
+                }
+
+                if(query.toLowerCase().contains("send message")||query.toLowerCase().contains("send a message")||query.toLowerCase().contains("send the message"))
+                {
+                    String sendTo = null;
+                    String number = null;
+
+                    sendMessage = getString(R.string.send_message);
+                    if(query.contains("to")) {
+                        sendTo = query.substring(query.indexOf("to") + 3, query.length());
+                        Log.d(TAG, "computeOtherMessage: " + sendTo);
+                    }
+
+                    if(sendTo!=null)
+                        number = sendTo;
+
+                    if(number != null) {
+                        Intent sendIntent = new Intent(Intent.ACTION_VIEW, Uri.fromParts("sms", number, null));
+                        startActivity(sendIntent);
+                    }
+                    else {
+                        Intent sendIntent = new Intent(Intent.ACTION_VIEW);
+                        sendIntent.setData(Uri.parse("sms:"));
+                        startActivity(sendIntent);
+                    }
+
+                    isHavingLink = false;
+
+                }
+
+                if(query.toLowerCase().contains("send mail")||query.toLowerCase().contains("send a mail")||query.toLowerCase().contains("send the mail")){
+                    sendMail = getString(R.string.send_mail);
+                    isHavingLink = false;
+                }
+
                 if(section[0].equalsIgnoreCase("@google")){
                     int size = section.length;
+                    googlesearch_query = "";
                     for (int i = 1; i < size; i++) {
                         googlesearch_query = googlesearch_query + " " + section[i];
                     }
-                    google_search = getString(R.string.google_search);
+                    googleSearch = getString(R.string.google_search);
                 }
                 final float latitude = PrefManager.getFloat(Constant.LATITUDE, 0);
                 final float longitude = PrefManager.getFloat(Constant.LONGITUDE, 0);
                 final String geo_source = PrefManager.getString(Constant.GEO_SOURCE, "ip");
                 Log.d(TAG, clientBuilder.getSusiApi().getSusiResponse(timezoneOffset, longitude, latitude, geo_source, query).request().url().toString());
-                final String finalAnswer_call = answer_call;
-                final String finalgoogle_search = google_search;
+                final String finalAnswer_call = answerCall;
+                final String finalgoogle_search = googleSearch;
+                final String finalSetAlarm = setAlarm;
+                final String finalReminder = reminder;
+                final String finalSendMail = sendMail;
+
+                if(playVideo !=null && playVideo.equals(getString(R.string.play_video))){
+                    answer = playVideo;
+                    isWebSearch = false;
+                    count ++;
+
+                }
+
+                final String finalPlayVideo = playVideo;
+                final String finalSendMessage = sendMessage;
                 clientBuilder.getSusiApi().getSusiResponse(timezoneOffset, longitude, latitude, geo_source, query).enqueue(
                         new Callback<SusiResponse>() {
                             @Override
                             public void onResponse(Call<SusiResponse> call,
                                                    Response<SusiResponse> response) {
-                                recyclerAdapter.hideDots();
+                                int code = response.code();
+                                if(code >= 200 && code < 300) {
+                                    recyclerAdapter.showDots();
+                                }
+
                                 if (response != null && response.isSuccessful() && response.body() != null) {
                                     final SusiResponse susiResponse = response.body();
                                     int responseActionSize = response.body().getAnswers().get(0).getActions().size();
@@ -740,18 +895,94 @@ public class MainActivity extends AppCompatActivity {
                                             }
                                         });
                                         rvChatFeed.getRecycledViewPool().clear();
+                                        recyclerAdapter.hideDots();
                                         recyclerAdapter.notifyItemChanged((int) id);
 
                                         if(finalAnswer_call!=null && finalAnswer_call.contains("Calling"))
                                         {
                                             answer = finalAnswer_call;
                                             isWebSearch = false;
+                                            voiceReply(answer , false);
                                         }
                                         if(finalgoogle_search!=null&&finalgoogle_search.contains("google"))
                                         {
                                             answer = finalgoogle_search;
                                             isWebSearch = false;
+                                            voiceReply(answer , false);
                                         }
+                                        if(finalSetAlarm !=null && finalSetAlarm.contains("Alarm")){
+                                            answer = finalSetAlarm;
+                                            isWebSearch = false;
+                                            voiceReply(answer , false);
+
+                                        }
+                                        if(finalPlayVideo !=null && finalPlayVideo.equals(getString(R.string.play_video))){
+                                            answer = finalPlayVideo;
+                                            isWebSearch = false;
+                                            voiceReply(answer , false);
+                                        }
+                                        if(finalSendMail != null && finalSendMail.equals(getString(R.string.send_mail))){
+
+                                            if(query.contains("to")) {
+                                                String[] sendTo = {query.substring(query.indexOf("to") + 3, query.length())};
+                                                Log.d(TAG, "onResponse: " + sendTo);
+                                                composeEmail(sendTo);
+
+                                            }
+                                            else{
+                                                composeEmail();
+                                            }
+
+                                            answer = finalSendMail;
+                                            isWebSearch = false;
+                                            voiceReply(answer , false);
+
+                                        }
+
+                                        if(finalSendMessage != null && finalSendMessage.equals(getString(R.string.send_message))){
+                                            answer = finalSendMessage;
+                                            isHavingLink = false;
+                                            isWebSearch = false;
+                                            voiceReply(answer , false);
+                                        }
+
+                                        if(finalReminder != null && finalReminder.equals(getString(R.string.reminder_description))){
+                                            Log.d(TAG , "reminder Counter  " + reminderQuery);
+                                            answer = finalReminder;
+                                            reminderQuery = 1;
+                                            isWebSearch = false;
+                                            voiceReply(answer , false);
+
+                                        }
+                                        else {
+                                            switch(reminderQuery){
+                                                case 1:
+                                                    MainActivity.this.reminder = query;
+                                                    reminderDate[0] = getString(R.string.reminder_date);
+                                                    answer = reminderDate[0];
+                                                    isWebSearch = false;
+                                                    Log.d(TAG, "onResponse: " + MainActivity.this.reminder);
+                                                    reminderQuery = 2;
+                                                    voiceReply(answer , false);
+                                                    break;
+
+                                                case 2:
+                                                    answer = getString(R.string.set_reminder);
+                                                    isWebSearch = false;
+                                                    reminderQuery = 0;
+                                                    String date = query;
+                                                    setReminder(MainActivity.this.reminder, date);
+                                                    voiceReply(answer , false);
+                                                    Log.d(TAG, "onResponse: query" + date);
+                                                    break;
+
+                                                default:
+                                                    Log.d(TAG, "onResponse: Not valid");
+                                                    break;
+                                            }
+
+                                        }
+
 
                                         final String setMessage = answer;
                                         final int counterValue = counter;
@@ -824,9 +1055,16 @@ public class MainActivity extends AppCompatActivity {
                                                 }
                                             }
                                         });
-                                        rvChatFeed.getRecycledViewPool().clear();
-                                        recyclerAdapter.notifyItemChanged((int) id);
-                                        addNewMessage(getString(R.string.error_invalid_token), false, false, false, false, false, null);
+                                        if(count == 1) {
+                                            rvChatFeed.getRecycledViewPool().clear();
+                                            recyclerAdapter.notifyItemChanged((int) id);
+                                            addNewMessage(getString(R.string.play_video), false, false, false, false, false, null);
+                                        }
+                                        else{
+                                            rvChatFeed.getRecycledViewPool().clear();
+                                            recyclerAdapter.notifyItemChanged((int) id);
+                                            addNewMessage(getString(R.string.error_internet_connectivity), false, false, false, false, false, null);
+                                        }
                                     }
                                     rvChatFeed.getRecycledViewPool().clear();
                                     recyclerAdapter.notifyItemChanged((int) id);
@@ -866,9 +1104,16 @@ public class MainActivity extends AppCompatActivity {
                                             }
                                         }
                                     });
-                                    rvChatFeed.getRecycledViewPool().clear();
-                                    recyclerAdapter.notifyItemChanged((int) id);
-                                    addNewMessage(getString(R.string.error_internet_connectivity), false, false, false, false, false, null);
+                                    if(count == 1) {
+                                        rvChatFeed.getRecycledViewPool().clear();
+                                        recyclerAdapter.notifyItemChanged((int) id);
+                                        addNewMessage(getString(R.string.play_video), false, false, false, false, false, null);
+                                    }
+                                    else {
+                                        rvChatFeed.getRecycledViewPool().clear();
+                                        recyclerAdapter.notifyItemChanged((int) id);
+                                        addNewMessage(getString(R.string.error_internet_connectivity), false, false, false, false, false, null);
+                                    }
                                 }
                                 BaseUrl.updateBaseUrl(t);
                                 computeOtherMessage();
@@ -915,9 +1160,76 @@ public class MainActivity extends AppCompatActivity {
             googlesearch_query = "";
         }
 
+        if(answer.equals(getString(R.string.play_video))){
+            video_query = video_query.replace(" ", "+");
+            Log.d(TAG, "addNewMessage: " + video_query);
+
+            ///String videoId = GetVideos.getvideos(video_query);
+
+            //Log.d(TAG, "addNewMessage: " + videoId);
+
+            //Intent i = new Intent(MainActivity.this , GetVideos.class);
+            //startActivity(i);
+
+            video_query = "";
+
+        }
+
         if(answer.contains("Calling")){
             String splits[]=answer.split(" ");
             startActivity(new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", splits[1], null)));
+        }
+
+        if(answer.equals(getString(R.string.set_alarm))){
+
+            Log.d(TAG, "addNewMessage: " + Arrays.toString(array));
+            Log.d(TAG, "addNewMessage: " + array.length);
+            Log.d(TAG, "addNewMessage: " + timenow);
+
+
+            if(array.length == 0){
+
+                Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+                i.putExtra(AlarmClock.EXTRA_MESSAGE, "New Alarm");
+                startActivity(i);
+
+            }
+            else if(array.length == 1){
+
+
+                Log.d(TAG, "addNewMessage: " + array[0]);
+
+                int hour = Integer.parseInt(array[0]);
+
+                Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+                i.putExtra(AlarmClock.EXTRA_MESSAGE, "New Alarm");
+                i.putExtra(AlarmClock.EXTRA_HOUR, hour);
+                i.putExtra(AlarmClock.EXTRA_MINUTES, 0);
+                if (timenow!=null&&Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    i.putExtra(AlarmClock.EXTRA_IS_PM,timenow.equalsIgnoreCase("PM"));
+                }
+                startActivity(i);
+            }
+
+            else {
+
+                Log.d(TAG, "addNewMessage: " + array[0] + array[1]);
+
+                int hour = Integer.parseInt(array[0]);
+                int min = Integer.parseInt(array[1]);
+
+                Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+                i.putExtra(AlarmClock.EXTRA_MESSAGE, "New Alarm");
+                i.putExtra(AlarmClock.EXTRA_HOUR, hour);
+                i.putExtra(AlarmClock.EXTRA_MINUTES, min);
+                if (timenow!=null&&Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    i.putExtra(AlarmClock.EXTRA_IS_PM,timenow.equalsIgnoreCase("PM"));
+                }
+                startActivity(i);
+
+            }
+
+
         }
 
         updateDatabase(id, answer, DateTimeHelper.getDate(), false, false, isSearchReult, isWebSearch, false, isMap, isHavingLink, DateTimeHelper.getCurrentTime(), isPieChart, datumList);
@@ -1074,6 +1386,7 @@ public class MainActivity extends AppCompatActivity {
         if (atHome) {
             if (backPressedOnce) {
                 finish();
+                return;
             }
             backPressedOnce = true;
             Toast.makeText(this, R.string.exit, Toast.LENGTH_SHORT).show();
@@ -1097,6 +1410,25 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             case R.id.wall_settings:
                 chatBackgroundActivity();
+                int permissionCheck = ActivityCompat.checkSelfPermission(MainActivity.this,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE);
+                if (permissionCheck!= PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+                }
+                return true;
+            case R.id.action_share:
+                try {
+                    Intent shareIntent = new Intent();
+                    shareIntent.setAction(Intent.ACTION_SEND);
+                    shareIntent.setType("text/plain");
+                    shareIntent.putExtra(Intent.EXTRA_TEXT,
+                            String.format(getString(R.string.promo_msg_template),
+                                    String.format(getString(R.string.app_share_url),getPackageName())));
+                    startActivity(shareIntent);
+                }
+                catch (Exception e) {
+                    showToast(getString(R.string.error_msg_retry));
+                }
                 return true;
             case R.id.up_angle:
                 offset++;
@@ -1178,6 +1510,99 @@ public class MainActivity extends AppCompatActivity {
         );
         checkEnterKeyPref();
     }
+
+
+    public void setReminder(String des , String time){
+
+        LinkedList<String> list = new LinkedList<>();
+        Matcher matcher = Pattern.compile("\\d+").matcher(time);
+        while (matcher.find()) {
+            list.add(matcher.group());
+        }
+
+        String[] timeArray;
+
+        timeArray = list.toArray(new String[list.size()]);
+
+        Log.v(TAG, "computeOtherMessage: " + Arrays.toString(timeArray));
+
+        Log.d(TAG ,System.currentTimeMillis() + "Current Time");
+
+        Calendar endTime = Calendar.getInstance(TimeZone.getDefault());
+
+
+        if(timeArray.length >= 2) {
+
+            Log.d(TAG, "setReminder: " + timeArray[0] + "  " + timeArray[1]);
+
+            endTime.set(endTime.get(Calendar.YEAR),
+                    endTime.get(Calendar.MONTH),
+                    endTime.get(Calendar.DATE),
+                    Integer.parseInt(timeArray[0]),
+                    Integer.parseInt(timeArray[1]));
+        }
+
+        Toast.makeText(this, "Setting the Reminder", Toast.LENGTH_SHORT).show();
+
+            Intent intent = new Intent(Intent.ACTION_INSERT)
+                    .setData(CalendarContract.Events.CONTENT_URI)
+                    .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, System.currentTimeMillis())
+                    .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endTime.getTimeInMillis())
+                    .putExtra(CalendarContract.Events.TITLE, des)
+                    .putExtra(CalendarContract.Events.AVAILABILITY, CalendarContract.Events.AVAILABILITY_BUSY);
+            startActivity(intent);
+
+    }
+
+    public void composeEmail(String[] adresses){
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:"));
+        intent.putExtra(Intent.EXTRA_EMAIL , adresses);
+        if(intent.resolveActivity(getPackageManager()) != null) {
+            startActivity(intent);
+        }
+    }
+
+    public void composeEmail(){
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:"));
+        if(intent.resolveActivity(getPackageManager()) != null) {
+            startActivity(intent);
+        }
+
+    }
+
+
+
+    public String getvideos(String query) {
+
+        id[0] = null;
+        final VideoSeachClient apiService = VideoSearchApi.getClient().create(VideoSeachClient.class);
+
+        Call<VideoSearch> call = apiService.getVideo(query);
+
+        call.enqueue(new Callback<VideoSearch>() {
+            @Override
+            public void onResponse(Call<VideoSearch> call, Response<VideoSearch> response) {
+                id[0] = response.body().getItems().get(0).getId().getVideoId();
+                Log.d(TAG, "onResponse: " + id[0]);
+
+                    Intent i = new Intent(MainActivity.this, GetVideos.class);
+                    i.putExtra("youtubeId", id[0]);
+                    startActivity(i);
+
+            }
+
+            @Override
+            public void onFailure(Call<VideoSearch> call, Throwable t) {
+                Log.d(TAG, "onFailure: " + t.toString());
+            }
+        });
+
+        return id[0];
+
+    }
+
 
     @Override
     protected void onPause() {

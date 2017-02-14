@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/colorAccent">
+    android:background="@color/colorPrimary">
 
     <LinearLayout
         android:id="@+id/activity_sign_up"
@@ -22,6 +22,8 @@
             android:id="@+id/email"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:textColor="@color/edit_text_login_screen"
+            android:textColorHint="@color/edit_text_login_screen"
             app:errorEnabled="true">
 
             <android.support.design.widget.TextInputEditText
@@ -29,6 +31,9 @@
                 android:layout_height="wrap_content"
                 android:hint="@string/email"
                 android:inputType="textEmailAddress"
+                android:textColor="@color/edit_text_login_screen"
+                app:theme="@style/Login_Theme"
+                android:textColorHint="@color/edit_text_login_screen"
                 android:maxLines="1" />
         </android.support.design.widget.TextInputLayout>
 
@@ -37,13 +42,19 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
+            android:textColor="@color/edit_text_login_screen"
+            android:textColorHint="@color/edit_text_login_screen"
+            app:passwordToggleEnabled="true"
             app:errorEnabled="true">
 
             <android.support.design.widget.TextInputEditText
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/password"
+                app:theme="@style/Login_Theme"
                 android:inputType="textPassword"
+                android:textColor="@color/edit_text_login_screen"
+                android:textColorHint="@color/edit_text_login_screen"
                 android:maxLines="1"
 
                 />
@@ -53,14 +64,20 @@
             android:id="@+id/confirm_password"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="@dimen/message_layout_margin"
+            app:passwordToggleEnabled="true"
+            android:textColor="@color/edit_text_login_screen"
+            android:textColorHint="@color/edit_text_login_screen"
             app:errorEnabled="true">
 
             <android.support.design.widget.TextInputEditText
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/confirm_password"
+                app:theme="@style/Login_Theme"
                 android:inputType="textPassword"
+                android:textColor="@color/edit_text_login_screen"
+                android:textColorHint="@color/edit_text_login_screen"
                 android:maxLines="1"
 
                 />
